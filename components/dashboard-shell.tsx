@@ -30,6 +30,7 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
   const [addCollectionOpen, setAddCollectionOpen] = useState(false)
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
 
   const openAddBookmarkDialog = useCallback(() => {
     requestAnimationFrame(() => setAddBookmarkOpen(true))
@@ -141,6 +142,15 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
   )
 
   const handleDeleteBookmark = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this bookmark?')) {
+      return
+    }
+
+    // Optimistic update
+    const previousBookmarks = bookmarks
+    setBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
+    setDeletingIds((prev) => new Set(prev).add(id))
+
     const supabase = createClient()
     const { error } = await supabase
       .from('bookmarks')
@@ -148,17 +158,32 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
       .eq('id', id)
       .eq('user_id', user.id)
 
+    setDeletingIds((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+
     if (error) {
       toast.error('Failed to delete bookmark')
-      return
+      setBookmarks(previousBookmarks) // Rollback
     }
-
-    setBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
   }
 
   const handleToggleFavorite = async (id: string, isFavorite: boolean) => {
-    const supabase = createClient()
     const nextFavorite = !isFavorite
+
+    // Optimistic update
+    const previousBookmarks = bookmarks
+    setBookmarks((prev) =>
+      prev.map((bookmark) =>
+        bookmark.id === id
+          ? { ...bookmark, is_favorite: nextFavorite }
+          : bookmark
+      )
+    )
+
+    const supabase = createClient()
     const { error } = await supabase
       .from('bookmarks')
       .update({ is_favorite: nextFavorite })
@@ -167,22 +192,15 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
 
     if (error) {
       toast.error('Failed to update favorite')
-      return
+      setBookmarks(previousBookmarks) // Rollback
     }
-
-    setBookmarks((prev) =>
-      prev.map((bookmark) =>
-        bookmark.id === id
-          ? {
-              ...bookmark,
-              is_favorite: nextFavorite,
-            }
-          : bookmark
-      )
-    )
   }
 
   const handleDeleteCollection = async (id: string) => {
+    if (!window.confirm('Delete this collection? Bookmarks inside will be moved to "All Bookmarks".')) {
+      return
+    }
+
     const supabase = createClient()
     const { error } = await supabase
       .from('collections')
@@ -200,9 +218,9 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
       prev.map((bookmark) =>
         bookmark.collection_id === id
           ? {
-              ...bookmark,
-              collection_id: null,
-            }
+            ...bookmark,
+            collection_id: null,
+          }
           : bookmark
       )
     )
@@ -288,6 +306,7 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
           open={!!editingBookmark}
           onOpenChange={(open) => !open && setEditingBookmark(null)}
           bookmark={editingBookmark}
+          userId={user.id}
           collections={collections}
         />
       )}

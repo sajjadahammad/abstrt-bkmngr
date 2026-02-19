@@ -23,6 +23,7 @@ interface EditBookmarkDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   bookmark: Bookmark
+  userId: string
   collections: Collection[]
 }
 
@@ -40,6 +41,7 @@ export function EditBookmarkDialog({
   open,
   onOpenChange,
   bookmark,
+  userId,
   collections,
 }: EditBookmarkDialogProps) {
   const {
@@ -71,6 +73,7 @@ export function EditBookmarkDialog({
         updated_at: new Date().toISOString(),
       })
       .eq('id', bookmark.id)
+      .eq('user_id', userId)
 
     if (error) {
       toast.error('Failed to update bookmark')
