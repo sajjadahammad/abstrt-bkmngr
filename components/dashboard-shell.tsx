@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { User } from '@supabase/supabase-js'
 import type { Bookmark, Collection } from '@/lib/types'
@@ -10,6 +10,8 @@ import { BookmarkHeader } from '@/components/bookmark-header'
 import { AddBookmarkDialog } from '@/components/add-bookmark-dialog'
 import { AddCollectionDialog } from '@/components/add-collection-dialog'
 import { EditBookmarkDialog } from '@/components/edit-bookmark-dialog'
+import { useBookmarkSubscription } from '@/hooks/use-bookmark-subscription'
+import { useCollectionSubscription } from '@/hooks/use-collection-subscription'
 import { toast } from 'sonner'
 
 interface DashboardShellProps {
@@ -51,75 +53,67 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
     })
   }, [])
 
-  // Real-time subscription
-  useEffect(() => {
-    const supabase = createClient()
-
-    const bookmarkChannel = supabase
-      .channel('bookmarks-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'bookmarks',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setBookmarks((prev) => {
-              const nextBookmark = payload.new as Bookmark
-              if (prev.some((item) => item.id === nextBookmark.id)) {
-                return prev
-              }
-              return [nextBookmark, ...prev]
-            })
-          } else if (payload.eventType === 'UPDATE') {
-            setBookmarks((prev) =>
-              prev.map((b) => (b.id === (payload.new as Bookmark).id ? (payload.new as Bookmark) : b))
-            )
-          } else if (payload.eventType === 'DELETE') {
-            setBookmarks((prev) => prev.filter((b) => b.id !== (payload.old as Bookmark).id))
-          }
+  // Real-time subscriptions using custom hooks
+  useBookmarkSubscription({
+    userId: user.id,
+    onInsert: useCallback((bookmark: Bookmark) => {
+      setBookmarks((prev) => {
+        if (prev.some((item) => item.id === bookmark.id)) {
+          return prev
         }
+        return [bookmark, ...prev]
+      })
+    }, []),
+    onUpdate: useCallback((bookmark: Bookmark) => {
+      setBookmarks((prev) =>
+        prev.map((b) => (b.id === bookmark.id ? bookmark : b))
       )
-      .subscribe()
+    }, []),
+    onDelete: useCallback((bookmarkId: string) => {
+      setBookmarks((prev) => prev.filter((b) => b.id !== bookmarkId))
+    }, []),
+    onError: useCallback((error: Error) => {
+      console.error('Bookmark subscription error:', error)
+      toast.error('Connection issue. Reconnecting...')
+    }, []),
+  })
 
-    const collectionChannel = supabase
-      .channel('collections-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'collections',
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            setCollections((prev) => {
-              const nextCollection = payload.new as Collection
-              if (prev.some((item) => item.id === nextCollection.id)) {
-                return prev
-              }
-              return [...prev, nextCollection]
-            })
-          } else if (payload.eventType === 'UPDATE') {
-            setCollections((prev) =>
-              prev.map((c) => (c.id === (payload.new as Collection).id ? (payload.new as Collection) : c))
-            )
-          } else if (payload.eventType === 'DELETE') {
-            setCollections((prev) => prev.filter((c) => c.id !== (payload.old as Collection).id))
-          }
+  useCollectionSubscription({
+    userId: user.id,
+    onInsert: useCallback((collection: Collection) => {
+      setCollections((prev) => {
+        if (prev.some((item) => item.id === collection.id)) {
+          return prev
         }
+        return [...prev, collection]
+      })
+    }, []),
+    onUpdate: useCallback((collection: Collection) => {
+      setCollections((prev) =>
+        prev.map((c) => (c.id === collection.id ? collection : c))
       )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(bookmarkChannel)
-      supabase.removeChannel(collectionChannel)
-    }
-  }, [user.id])
+    }, []),
+    onDelete: useCallback((collectionId: string) => {
+      setCollections((prev) => prev.filter((c) => c.id !== collectionId))
+      // Update bookmarks that belonged to deleted collection
+      setBookmarks((prev) =>
+        prev.map((bookmark) =>
+          bookmark.collection_id === collectionId
+            ? { ...bookmark, collection_id: null }
+            : bookmark
+        )
+      )
+      // Reset active collection if it was deleted
+      if (activeCollection === collectionId) {
+        setActiveCollection(null)
+        setShowFavorites(false)
+      }
+    }, [activeCollection]),
+    onError: useCallback((error: Error) => {
+      console.error('Collection subscription error:', error)
+      toast.error('Connection issue. Reconnecting...')
+    }, []),
+  })
 
   const filteredBookmarks = bookmarks.filter((bookmark) => {
     if (showFavorites && !bookmark.is_favorite) return false

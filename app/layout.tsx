@@ -3,6 +3,7 @@ import { DM_Sans } from 'next/font/google'
 import { Toaster } from 'sonner'
 
 import './globals.css'
+import '../lib/env' // Validate environment variables at startup
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
