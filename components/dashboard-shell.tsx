@@ -10,6 +10,7 @@ import { BookmarkHeader } from '@/components/bookmark-header'
 import { AddBookmarkDialog } from '@/components/add-bookmark-dialog'
 import { AddCollectionDialog } from '@/components/add-collection-dialog'
 import { EditBookmarkDialog } from '@/components/edit-bookmark-dialog'
+import { ConfirmDeleteDialog } from '@/components/confirm-delete-dialog'
 import { useBookmarkSubscription } from '@/hooks/use-bookmark-subscription'
 import { useCollectionSubscription } from '@/hooks/use-collection-subscription'
 import { toast } from 'sonner'
@@ -31,6 +32,8 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set())
+  const [pendingDelete, setPendingDelete] = useState<{ type: 'bookmark' | 'collection'; id: string } | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
 
   const openAddBookmarkDialog = useCallback(() => {
     requestAnimationFrame(() => setAddBookmarkOpen(true))
@@ -57,44 +60,44 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
   // Real-time subscriptions using custom hooks
   useBookmarkSubscription({
     userId: user.id,
-    onInsert: useCallback((bookmark: Bookmark) => {
+    onInsert: (bookmark: Bookmark) => {
       setBookmarks((prev) => {
         if (prev.some((item) => item.id === bookmark.id)) {
           return prev
         }
         return [bookmark, ...prev]
       })
-    }, []),
-    onUpdate: useCallback((bookmark: Bookmark) => {
+    },
+    onUpdate: (bookmark: Bookmark) => {
       setBookmarks((prev) =>
         prev.map((b) => (b.id === bookmark.id ? bookmark : b))
       )
-    }, []),
-    onDelete: useCallback((bookmarkId: string) => {
+    },
+    onDelete: (bookmarkId: string) => {
       setBookmarks((prev) => prev.filter((b) => b.id !== bookmarkId))
-    }, []),
-    onError: useCallback((error: Error) => {
+    },
+    onError: (error: Error) => {
       console.error('Bookmark subscription error:', error)
       toast.error('Connection issue. Reconnecting...')
-    }, []),
+    },
   })
 
   useCollectionSubscription({
     userId: user.id,
-    onInsert: useCallback((collection: Collection) => {
+    onInsert: (collection: Collection) => {
       setCollections((prev) => {
         if (prev.some((item) => item.id === collection.id)) {
           return prev
         }
         return [...prev, collection]
       })
-    }, []),
-    onUpdate: useCallback((collection: Collection) => {
+    },
+    onUpdate: (collection: Collection) => {
       setCollections((prev) =>
         prev.map((c) => (c.id === collection.id ? collection : c))
       )
-    }, []),
-    onDelete: useCallback((collectionId: string) => {
+    },
+    onDelete: (collectionId: string) => {
       setCollections((prev) => prev.filter((c) => c.id !== collectionId))
       // Update bookmarks that belonged to deleted collection
       setBookmarks((prev) =>
@@ -109,11 +112,11 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
         setActiveCollection(null)
         setShowFavorites(false)
       }
-    }, [activeCollection]),
-    onError: useCallback((error: Error) => {
+    },
+    onError: (error: Error) => {
       console.error('Collection subscription error:', error)
       toast.error('Connection issue. Reconnecting...')
-    }, []),
+    },
   })
 
   const filteredBookmarks = bookmarks.filter((bookmark) => {
@@ -141,10 +144,12 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
     [bookmarks]
   )
 
-  const handleDeleteBookmark = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this bookmark?')) {
-      return
-    }
+  const handleDeleteBookmark = (id: string) => {
+    setPendingDelete({ type: 'bookmark', id })
+  }
+
+  const executeDeleteBookmark = async (id: string) => {
+    setDeleteLoading(true)
 
     // Optimistic update
     const previousBookmarks = bookmarks
@@ -163,6 +168,8 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
       next.delete(id)
       return next
     })
+    setDeleteLoading(false)
+    setPendingDelete(null)
 
     if (error) {
       toast.error('Failed to delete bookmark')
@@ -196,10 +203,12 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
     }
   }
 
-  const handleDeleteCollection = async (id: string) => {
-    if (!window.confirm('Delete this collection? Bookmarks inside will be moved to "All Bookmarks".')) {
-      return
-    }
+  const handleDeleteCollection = (id: string) => {
+    setPendingDelete({ type: 'collection', id })
+  }
+
+  const executeDeleteCollection = async (id: string) => {
+    setDeleteLoading(true)
 
     const supabase = createClient()
     const { error } = await supabase
@@ -207,6 +216,9 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
       .delete()
       .eq('id', id)
       .eq('user_id', user.id)
+
+    setDeleteLoading(false)
+    setPendingDelete(null)
 
     if (error) {
       toast.error('Failed to delete collection')
@@ -310,6 +322,30 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
           collections={collections}
         />
       )}
+
+      <ConfirmDeleteDialog
+        open={!!pendingDelete}
+        onOpenChange={(open) => !open && setPendingDelete(null)}
+        title={
+          pendingDelete?.type === 'collection'
+            ? 'Delete Collection'
+            : 'Delete Bookmark'
+        }
+        description={
+          pendingDelete?.type === 'collection'
+            ? 'This will delete the collection. Bookmarks inside will be moved to "All Bookmarks".'
+            : 'Are you sure you want to delete this bookmark? This action cannot be undone.'
+        }
+        loading={deleteLoading}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          if (pendingDelete.type === 'bookmark') {
+            executeDeleteBookmark(pendingDelete.id)
+          } else {
+            executeDeleteCollection(pendingDelete.id)
+          }
+        }}
+      />
     </div>
   )
 }

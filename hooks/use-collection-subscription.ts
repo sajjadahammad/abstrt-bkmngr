@@ -1,14 +1,14 @@
-import { useEffect, useRef, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import type { Collection } from '@/lib/types'
-import type { RealtimeChannel } from '@supabase/supabase-js'
+import { useEffect, useRef } from "react";
+import { createClient } from "@/lib/supabase/client";
+import type { Collection } from "@/lib/types";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 interface UseCollectionSubscriptionOptions {
-  userId: string
-  onInsert?: (collection: Collection) => void
-  onUpdate?: (collection: Collection) => void
-  onDelete?: (collectionId: string) => void
-  onError?: (error: Error) => void
+  userId: string;
+  onInsert?: (collection: Collection) => void;
+  onUpdate?: (collection: Collection) => void;
+  onDelete?: (collectionId: string) => void;
+  onError?: (error: Error) => void;
 }
 
 export function useCollectionSubscription({
@@ -18,96 +18,67 @@ export function useCollectionSubscription({
   onDelete,
   onError,
 }: UseCollectionSubscriptionOptions) {
-  const channelRef = useRef<RealtimeChannel | null>(null)
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>(null)
-  const reconnectAttemptsRef = useRef(0)
-  const maxReconnectAttempts = 5
+  const onInsertRef = useRef(onInsert);
+  const onUpdateRef = useRef(onUpdate);
+  const onDeleteRef = useRef(onDelete);
+  const onErrorRef = useRef(onError);
 
-  const handleError = useCallback(
-    (error: Error) => {
-      console.error('Collection subscription error:', error)
-      onError?.(error)
-
-      // Attempt reconnection with exponential backoff
-      if (reconnectAttemptsRef.current < maxReconnectAttempts) {
-        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000)
-        reconnectTimeoutRef.current = setTimeout(() => {
-          reconnectAttemptsRef.current++
-          console.log(`Attempting to reconnect collection subscription (attempt ${reconnectAttemptsRef.current})`)
-          // The useEffect will handle reconnection when dependencies change
-        }, delay)
-      }
-    },
-    [onError]
-  )
+  onInsertRef.current = onInsert;
+  onUpdateRef.current = onUpdate;
+  onDeleteRef.current = onDelete;
+  onErrorRef.current = onError;
 
   useEffect(() => {
-    // Prevent duplicate subscriptions
-    if (channelRef.current) {
-      return
-    }
+    if (!userId) return;
 
-    const supabase = createClient()
-    
-    const channel = supabase
-      .channel(`collections-${userId}`)
+    const supabase = createClient();
+
+    console.log(`Setting up collection subscription for user: ${userId}`);
+
+    const channel: RealtimeChannel = supabase
+      .channel(`public:collections:${userId}`)
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
-          table: 'collections',
-          filter: `user_id=eq.${userId}`,
+          event: "*",
+          schema: "public",
+          table: "collections",
         },
         (payload) => {
+          console.log("RECEIVED COLLECTION EVENT:", payload);
           try {
-            if (payload.eventType === 'INSERT') {
-              const collection = payload.new as Collection
-              onInsert?.(collection)
-            } else if (payload.eventType === 'UPDATE') {
-              const collection = payload.new as Collection
-              onUpdate?.(collection)
-            } else if (payload.eventType === 'DELETE') {
-              const collection = payload.old as Collection
-              onDelete?.(collection.id)
+            if (payload.eventType === "INSERT") {
+              onInsertRef.current?.(payload.new as Collection);
+            } else if (payload.eventType === "UPDATE") {
+              onUpdateRef.current?.(payload.new as Collection);
+            } else if (payload.eventType === "DELETE") {
+              const oldId = (payload.old as { id: string })?.id;
+              if (oldId) {
+                onDeleteRef.current?.(oldId);
+              }
             }
-            
-            // Reset reconnect attempts on successful message
-            reconnectAttemptsRef.current = 0
           } catch (error) {
-            handleError(error as Error)
+            console.error("Collection subscription handler error:", error);
+            onErrorRef.current?.(error as Error);
           }
-        }
+        },
       )
       .subscribe((status, err) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('Collection subscription active')
-          reconnectAttemptsRef.current = 0
-        } else if (status === 'CHANNEL_ERROR') {
-          handleError(new Error(err?.message || 'Channel error'))
-        } else if (status === 'TIMED_OUT') {
-          handleError(new Error('Subscription timed out'))
-        } else if (status === 'CLOSED') {
-          console.log('Collection subscription closed')
+        console.log("Collection subscription status:", status, err);
+        if (status === "SUBSCRIBED") {
+          console.log("Collection subscription successfully established");
+        } else if (status === "CHANNEL_ERROR") {
+          console.error(
+            "Collection channel error details:",
+            JSON.stringify(err, null, 2),
+          );
+          onErrorRef.current?.(new Error(err?.message || "Channel error"));
         }
-      })
+      });
 
-    channelRef.current = channel
-
-    // Cleanup function
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
-      }
-      
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current)
-        channelRef.current = null
-      }
-    }
-  }, [userId, onInsert, onUpdate, onDelete, handleError])
-
-  return {
-    isConnected: channelRef.current !== null,
-  }
+      console.log("Cleaning up collection subscription");
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
 }

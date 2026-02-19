@@ -39,6 +39,10 @@ create policy "bookmarks_insert_own" on public.bookmarks for insert with check (
 create policy "bookmarks_update_own" on public.bookmarks for update using (auth.uid() = user_id);
 create policy "bookmarks_delete_own" on public.bookmarks for delete using (auth.uid() = user_id);
 
--- Enable realtime for bookmarks and collections
+-- Enable Realtime for bookmarks and collections
 alter publication supabase_realtime add table public.bookmarks;
 alter publication supabase_realtime add table public.collections;
+
+-- Set replica identity to full so RLS policies can be evaluated for all events
+alter table public.bookmarks replica identity full;
+alter table public.collections replica identity full;
