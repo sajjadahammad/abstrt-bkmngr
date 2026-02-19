@@ -2,7 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
-import { createClient } from '@/lib/supabase/client'
+import { createCollection } from '@/services/collection-service'
 import type { Collection } from '@/lib/types'
 import {
   collectionFormSchema,
@@ -59,25 +59,19 @@ export function AddCollectionDialog({
   const selectedColor = watch('color')
 
   async function onSubmit(values: CollectionFormValues) {
-    const supabase = createClient()
-
-    const { data, error } = await supabase
-      .from('collections')
-      .insert({
-        user_id: userId,
-        name: values.name.trim(),
+    try {
+      const data = await createCollection(userId, {
+        name: values.name,
         color: values.color,
       })
-      .select('*')
-      .single()
 
-    if (error || !data) {
-      toast.error('Failed to create collection')
-    } else {
-      onCollectionCreated?.(data as Collection)
+      onCollectionCreated?.(data)
       toast.success('Collection created')
       resetForm()
       onOpenChange(false)
+    } catch (error) {
+      console.error('Failed to create collection:', error)
+      toast.error('Failed to create collection')
     }
   }
 

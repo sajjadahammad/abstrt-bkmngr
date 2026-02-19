@@ -36,21 +36,24 @@ smart-bookmark-app/
 │   │   ├── page.tsx            # Dashboard (SSR: fetch bookmarks + collections)
 │   │   └── loading.tsx         # Skeleton loading UI (Suspense boundary)
 │   ├── auth/callback/route.ts  # OAuth callback → exchange code for session
-│   └── api/metadata/route.ts   # GET endpoint: scrape URL for title/desc/OG image
+│   └── api/metadata/route.ts   # GET endpoint: scrape URL (currently manual entry only)
 │
 ├── components/
-│   ├── dashboard-shell.tsx     # Main client component (state, realtime, CRUD)
+│   ├── dashboard-shell.tsx     # Main client component (state, realtime)
 │   ├── app-sidebar.tsx         # Sidebar: collections, favorites, user profile
-│   ├── bookmark-card.tsx       # Individual bookmark card with OG image
+│   ├── bookmark-card.tsx       # Individual bookmark card
 │   ├── bookmark-grid.tsx       # Responsive grid of bookmark cards
 │   ├── bookmark-header.tsx     # Search bar + "New" button
 │   ├── bookmark-skeleton.tsx   # Skeleton placeholder card for loading
-│   ├── add-bookmark-dialog.tsx # Dialog: add bookmark with metadata auto-fill
-│   ├── add-collection-dialog.tsx # Dialog: create collection with color picker
-│   ├── edit-bookmark-dialog.tsx  # Dialog: edit existing bookmark
+│   ├── add-bookmark-dialog.tsx # Dialog: add bookmark via service
+│   ├── add-collection-dialog.tsx # Dialog: create collection via service
+│   ├── edit-bookmark-dialog.tsx  # Dialog: edit existing bookmark via service
 │   ├── login-form.tsx          # Google OAuth login button
-│   ├── theme-provider.tsx      # next-themes wrapper (unused currently)
 │   └── ui/                     # shadcn/ui primitives (40+ components)
+│
+├── services/                   # Business Logic & Supabase Operations
+│   ├── bookmark-service.ts     # CRUD for bookmarks (with favicon auto-discovery)
+│   └── collection-service.ts   # CRUD for collections
 │
 ├── hooks/
 │   ├── use-bookmark-subscription.ts  # Realtime subscription for bookmarks
@@ -59,9 +62,9 @@ smart-bookmark-app/
 │   └── use-toast.ts            # Toast notifications hook
 │
 ├── lib/
-│   ├── env.ts                  # Zod-based env var validation (runs at startup)
+│   ├── env.ts                  # Zod-based env var validation
 │   ├── types.ts                # TypeScript interfaces: Bookmark, Collection
-│   ├── utils.ts                # cn() utility (clsx + tailwind-merge)
+│   ├── utils.ts                # cn() utility
 │   ├── validation.ts           # Zod schemas for bookmark/collection forms
 │   └── supabase/
 │       ├── client.ts           # Browser Supabase client

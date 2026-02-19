@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import type { User } from '@supabase/supabase-js'
 import type { Bookmark, Collection } from '@/lib/types'
 import { AppSidebar } from '@/components/app-sidebar'
@@ -14,6 +13,8 @@ import { ConfirmDeleteDialog } from '@/components/confirm-delete-dialog'
 import { useBookmarkSubscription } from '@/hooks/use-bookmark-subscription'
 import { useCollectionSubscription } from '@/hooks/use-collection-subscription'
 import { toast } from 'sonner'
+import { deleteBookmark, toggleFavorite } from '@/services/bookmark-service'
+import { deleteCollection } from '@/services/collection-service'
 
 interface DashboardShellProps {
   user: User
@@ -48,6 +49,12 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
     })
   }, [])
 
+  const handleBookmarkUpdated = useCallback((updated: Bookmark) => {
+    setBookmarks((prev) =>
+      prev.map((b) => (b.id === updated.id ? { ...b, ...updated } : b))
+    )
+  }, [])
+
   const handleCollectionCreated = useCallback((collection: Collection) => {
     setCollections((prev) => {
       if (prev.some((item) => item.id === collection.id)) {
@@ -68,9 +75,9 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
         return [bookmark, ...prev]
       })
     },
-    onUpdate: (bookmark: Bookmark) => {
+    onUpdate: (updated: Bookmark) => {
       setBookmarks((prev) =>
-        prev.map((b) => (b.id === bookmark.id ? bookmark : b))
+        prev.map((b) => (b.id === updated.id ? { ...b, ...updated } : b))
       )
     },
     onDelete: (bookmarkId: string) => {
@@ -92,9 +99,9 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
         return [...prev, collection]
       })
     },
-    onUpdate: (collection: Collection) => {
+    onUpdate: (updated: Collection) => {
       setCollections((prev) =>
-        prev.map((c) => (c.id === collection.id ? collection : c))
+        prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
       )
     },
     onDelete: (collectionId: string) => {
@@ -156,24 +163,20 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
     setBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
     setDeletingIds((prev) => new Set(prev).add(id))
 
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('bookmarks')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', user.id)
-
-    setDeletingIds((prev) => {
-      const next = new Set(prev)
-      next.delete(id)
-      return next
-    })
-    setDeleteLoading(false)
-    setPendingDelete(null)
-
-    if (error) {
+    try {
+      await deleteBookmark(user.id, id)
+    } catch (error) {
+      console.error('Failed to delete bookmark:', error)
       toast.error('Failed to delete bookmark')
       setBookmarks(previousBookmarks) // Rollback
+    } finally {
+      setDeletingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+      setDeleteLoading(false)
+      setPendingDelete(null)
     }
   }
 
@@ -190,14 +193,10 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
       )
     )
 
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('bookmarks')
-      .update({ is_favorite: nextFavorite })
-      .eq('id', id)
-      .eq('user_id', user.id)
-
-    if (error) {
+    try {
+      await toggleFavorite(user.id, id, nextFavorite)
+    } catch (error) {
+      console.error('Failed to update favorite:', error)
       toast.error('Failed to update favorite')
       setBookmarks(previousBookmarks) // Rollback
     }
@@ -210,36 +209,31 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
   const executeDeleteCollection = async (id: string) => {
     setDeleteLoading(true)
 
-    const supabase = createClient()
-    const { error } = await supabase
-      .from('collections')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', user.id)
+    try {
+      await deleteCollection(user.id, id)
 
-    setDeleteLoading(false)
-    setPendingDelete(null)
-
-    if (error) {
-      toast.error('Failed to delete collection')
-      return
-    }
-
-    setCollections((prev) => prev.filter((collection) => collection.id !== id))
-    setBookmarks((prev) =>
-      prev.map((bookmark) =>
-        bookmark.collection_id === id
-          ? {
-            ...bookmark,
-            collection_id: null,
-          }
-          : bookmark
+      setCollections((prev) => prev.filter((collection) => collection.id !== id))
+      setBookmarks((prev) =>
+        prev.map((bookmark) =>
+          bookmark.collection_id === id
+            ? {
+              ...bookmark,
+              collection_id: null,
+            }
+            : bookmark
+        )
       )
-    )
 
-    if (activeCollection === id) {
-      setActiveCollection(null)
-      setShowFavorites(false)
+      if (activeCollection === id) {
+        setActiveCollection(null)
+        setShowFavorites(false)
+      }
+    } catch (error) {
+      console.error('Failed to delete collection:', error)
+      toast.error('Failed to delete collection')
+    } finally {
+      setDeleteLoading(false)
+      setPendingDelete(null)
     }
   }
 
@@ -320,6 +314,7 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
           bookmark={editingBookmark}
           userId={user.id}
           collections={collections}
+          onBookmarkUpdated={handleBookmarkUpdated}
         />
       )}
 

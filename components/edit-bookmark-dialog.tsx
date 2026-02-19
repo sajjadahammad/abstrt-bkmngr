@@ -3,11 +3,10 @@
 import { useEffect } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
-import { createClient } from '@/lib/supabase/client'
+import { updateBookmark } from '@/services/bookmark-service'
 import type { Bookmark, Collection } from '@/lib/types'
 import {
   bookmarkFormSchema,
-  parseTagInput,
   type BookmarkFormValues,
 } from '@/lib/validation'
 import {
@@ -25,6 +24,7 @@ interface EditBookmarkDialogProps {
   bookmark: Bookmark
   userId: string
   collections: Collection[]
+  onBookmarkUpdated: (bookmark: Bookmark) => void
 }
 
 function bookmarkToFormValues(bookmark: Bookmark): BookmarkFormValues {
@@ -43,6 +43,7 @@ export function EditBookmarkDialog({
   bookmark,
   userId,
   collections,
+  onBookmarkUpdated,
 }: EditBookmarkDialogProps) {
   const {
     register,
@@ -60,26 +61,21 @@ export function EditBookmarkDialog({
   }, [bookmark, reset])
 
   async function onSubmit(values: BookmarkFormValues) {
-    const supabase = createClient()
-
-    const { error } = await supabase
-      .from('bookmarks')
-      .update({
-        url: values.url.trim(),
-        title: values.title.trim(),
-        description: values.description.trim() || null,
-        collection_id: values.collectionId || null,
-        tags: parseTagInput(values.tags),
-        updated_at: new Date().toISOString(),
+    try {
+      const data = await updateBookmark(userId, bookmark.id, {
+        url: values.url,
+        title: values.title,
+        description: values.description,
+        collectionId: values.collectionId,
+        tags: values.tags,
       })
-      .eq('id', bookmark.id)
-      .eq('user_id', userId)
 
-    if (error) {
-      toast.error('Failed to update bookmark')
-    } else {
+      if (data) onBookmarkUpdated(data)
       toast.success('Bookmark updated')
       onOpenChange(false)
+    } catch (error) {
+      console.error('Failed to update bookmark:', error)
+      toast.error('Failed to update bookmark')
     }
   }
 

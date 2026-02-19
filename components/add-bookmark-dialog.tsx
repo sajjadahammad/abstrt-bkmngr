@@ -3,11 +3,10 @@
 import { useEffect, useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm } from 'react-hook-form'
-import { createClient } from '@/lib/supabase/client'
+import { createBookmark } from '@/services/bookmark-service'
 import type { Bookmark, Collection } from '@/lib/types'
 import {
   bookmarkFormSchema,
-  parseTagInput,
   type BookmarkFormValues,
 } from '@/lib/validation'
 import {
@@ -36,8 +35,6 @@ export function AddBookmarkDialog({
   activeCollection,
   onBookmarkCreated,
 }: AddBookmarkDialogProps) {
-  const [ogImage, setOgImage] = useState('')
-  const [fetching, setFetching] = useState(false)
   const {
     register,
     reset,
@@ -69,64 +66,24 @@ export function AddBookmarkDialog({
   const collectionField = register('collectionId')
   const tagsField = register('tags')
 
-  async function fetchMetadata(inputUrl: string) {
-    if (!inputUrl.trim()) return
-    setFetching(true)
-    try {
-      const res = await fetch(`/api/metadata?url=${encodeURIComponent(inputUrl)}`)
-      if (res.ok) {
-        const data = await res.json()
-        if (data.title && !getValues('title').trim()) {
-          setValue('title', data.title, { shouldDirty: true, shouldValidate: true })
-        }
-        if (data.description && !getValues('description').trim()) {
-          setValue('description', data.description, { shouldDirty: true, shouldValidate: true })
-        }
-        if (data.ogImage) setOgImage(data.ogImage)
-      }
-    } catch {
-      // silently fail
-    } finally {
-      setFetching(false)
-    }
-  }
 
   async function onSubmit(values: BookmarkFormValues) {
-    const supabase = createClient()
-    const trimmedUrl = values.url.trim()
-    const trimmedTitle = values.title.trim()
-    const trimmedDescription = values.description.trim()
-
-    let faviconUrl: string | null = null
     try {
-      const domain = new URL(trimmedUrl).origin
-      faviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=32`
-    } catch {
-      // ignore
-    }
-
-    const { data, error } = await supabase
-      .from('bookmarks')
-      .insert({
-        user_id: userId,
-        url: trimmedUrl,
-        title: trimmedTitle,
-        description: trimmedDescription || null,
-        collection_id: values.collectionId || null,
-        tags: parseTagInput(values.tags),
-        favicon_url: faviconUrl,
-        og_image_url: ogImage || null,
+      const data = await createBookmark(userId, {
+        url: values.url,
+        title: values.title,
+        description: values.description,
+        collectionId: values.collectionId,
+        tags: values.tags,
       })
-      .select('*')
-      .single()
 
-    if (error || !data) {
-      toast.error('Failed to add bookmark')
-    } else {
-      onBookmarkCreated?.(data as Bookmark)
+      onBookmarkCreated?.(data)
       toast.success('Bookmark added')
       resetForm()
       onOpenChange(false)
+    } catch (error) {
+      console.error('Failed to add bookmark:', error)
+      toast.error('Failed to add bookmark')
     }
   }
 
@@ -138,7 +95,6 @@ export function AddBookmarkDialog({
       collectionId: activeCollection || '',
       tags: '',
     })
-    setOgImage('')
   }
 
   return (
@@ -158,10 +114,6 @@ export function AddBookmarkDialog({
               required
               placeholder="https://example.com"
               {...urlField}
-              onBlur={(e) => {
-                urlField.onBlur(e)
-                void fetchMetadata(e.target.value)
-              }}
               aria-invalid={!!errors.url}
               className="h-9 rounded-lg border border-border bg-secondary/50 px-3 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
             />
@@ -171,9 +123,8 @@ export function AddBookmarkDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="bookmark-title" className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+            <label htmlFor="bookmark-title" className="text-xs font-medium text-muted-foreground">
               Title
-              {fetching && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
             </label>
             <input
               id="bookmark-title"
