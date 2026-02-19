@@ -1,7 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useForm } from 'react-hook-form'
 import { createClient } from '@/lib/supabase/client'
+import type { Collection } from '@/lib/types'
+import {
+  collectionFormSchema,
+  type CollectionFormValues,
+} from '@/lib/validation'
 import {
   Dialog,
   DialogContent,
@@ -15,6 +21,7 @@ interface AddCollectionDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   userId: string
+  onCollectionCreated?: (collection: Collection) => void
 }
 
 const COLORS = [
@@ -28,46 +35,66 @@ const COLORS = [
   '#14b8a6',
 ]
 
-export function AddCollectionDialog({ open, onOpenChange, userId }: AddCollectionDialogProps) {
-  const [name, setName] = useState('')
-  const [color, setColor] = useState(COLORS[0])
-  const [loading, setLoading] = useState(false)
+export function AddCollectionDialog({
+  open,
+  onOpenChange,
+  userId,
+  onCollectionCreated,
+}: AddCollectionDialogProps) {
+  const {
+    register,
+    watch,
+    reset,
+    setValue,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<CollectionFormValues>({
+    resolver: zodResolver(collectionFormSchema),
+    mode: 'onBlur',
+    defaultValues: {
+      name: '',
+      color: COLORS[0],
+    },
+  })
+  const selectedColor = watch('color')
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!name.trim()) {
-      toast.error('Collection name is required')
-      return
-    }
-
-    setLoading(true)
+  async function onSubmit(values: CollectionFormValues) {
     const supabase = createClient()
 
-    const { error } = await supabase.from('collections').insert({
-      user_id: userId,
-      name: name.trim(),
-      color,
-    })
+    const { data, error } = await supabase
+      .from('collections')
+      .insert({
+        user_id: userId,
+        name: values.name.trim(),
+        color: values.color,
+      })
+      .select('*')
+      .single()
 
-    setLoading(false)
-
-    if (error) {
+    if (error || !data) {
       toast.error('Failed to create collection')
     } else {
+      onCollectionCreated?.(data as Collection)
       toast.success('Collection created')
-      setName('')
-      setColor(COLORS[0])
+      resetForm()
       onOpenChange(false)
     }
   }
 
+  function resetForm() {
+    reset({
+      name: '',
+      color: COLORS[0],
+    })
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) resetForm(); onOpenChange(o) }}>
       <DialogContent className="border-border bg-card sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="text-foreground">New Collection</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="collection-name" className="text-xs font-medium text-muted-foreground">
               Name
@@ -77,25 +104,31 @@ export function AddCollectionDialog({ open, onOpenChange, userId }: AddCollectio
               type="text"
               required
               placeholder="e.g. Design Inspiration"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              {...register('name')}
+              aria-invalid={!!errors.name}
               className="h-9 rounded-lg border border-border bg-secondary/50 px-3 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
               autoFocus
             />
+            {errors.name && (
+              <p className="text-xs text-destructive">{errors.name.message}</p>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">Color</label>
+            <input type="hidden" {...register('color')} />
             <div className="flex gap-2">
               {COLORS.map((c) => (
                 <button
                   key={c}
                   type="button"
-                  onClick={() => setColor(c)}
+                  onClick={() =>
+                    setValue('color', c, { shouldDirty: true, shouldValidate: true })
+                  }
                   className="flex h-7 w-7 items-center justify-center rounded-full transition-transform hover:scale-110"
                   style={{ backgroundColor: c }}
                 >
-                  {color === c && (
+                  {selectedColor === c && (
                     <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
@@ -103,14 +136,17 @@ export function AddCollectionDialog({ open, onOpenChange, userId }: AddCollectio
                 </button>
               ))}
             </div>
+            {errors.color && (
+              <p className="text-xs text-destructive">{errors.color.message}</p>
+            )}
           </div>
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={isSubmitting}
             className="flex h-10 items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            {loading ? (
+            {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Creating...

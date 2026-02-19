@@ -26,6 +26,7 @@ export function BookmarkHeader({
       <div className="flex items-center gap-3">
         {!sidebarOpen && (
           <button
+            type="button"
             onClick={onToggleSidebar}
             className="mr-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
           >
@@ -53,6 +54,8 @@ export function BookmarkHeader({
         </div>
 
         <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
           onClick={onAddBookmark}
           className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >

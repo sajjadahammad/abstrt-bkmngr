@@ -1,8 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect } from 'react'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useForm } from 'react-hook-form'
 import { createClient } from '@/lib/supabase/client'
 import type { Bookmark, Collection } from '@/lib/types'
+import {
+  bookmarkFormSchema,
+  parseTagInput,
+  type BookmarkFormValues,
+} from '@/lib/validation'
 import {
   Dialog,
   DialogContent,
@@ -19,42 +26,51 @@ interface EditBookmarkDialogProps {
   collections: Collection[]
 }
 
+function bookmarkToFormValues(bookmark: Bookmark): BookmarkFormValues {
+  return {
+    url: bookmark.url,
+    title: bookmark.title,
+    description: bookmark.description || '',
+    collectionId: bookmark.collection_id || '',
+    tags: bookmark.tags.join(', '),
+  }
+}
+
 export function EditBookmarkDialog({
   open,
   onOpenChange,
   bookmark,
   collections,
 }: EditBookmarkDialogProps) {
-  const [url, setUrl] = useState(bookmark.url)
-  const [title, setTitle] = useState(bookmark.title)
-  const [description, setDescription] = useState(bookmark.description || '')
-  const [collectionId, setCollectionId] = useState<string>(bookmark.collection_id || '')
-  const [tags, setTags] = useState(bookmark.tags.join(', '))
-  const [loading, setLoading] = useState(false)
+  const {
+    register,
+    reset,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<BookmarkFormValues>({
+    resolver: zodResolver(bookmarkFormSchema),
+    mode: 'onBlur',
+    defaultValues: bookmarkToFormValues(bookmark),
+  })
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!url || !title) {
-      toast.error('URL and title are required')
-      return
-    }
+  useEffect(() => {
+    reset(bookmarkToFormValues(bookmark))
+  }, [bookmark, reset])
 
-    setLoading(true)
+  async function onSubmit(values: BookmarkFormValues) {
     const supabase = createClient()
 
     const { error } = await supabase
       .from('bookmarks')
       .update({
-        url,
-        title,
-        description: description || null,
-        collection_id: collectionId || null,
-        tags: tags ? tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+        url: values.url.trim(),
+        title: values.title.trim(),
+        description: values.description.trim() || null,
+        collection_id: values.collectionId || null,
+        tags: parseTagInput(values.tags),
         updated_at: new Date().toISOString(),
       })
       .eq('id', bookmark.id)
-
-    setLoading(false)
 
     if (error) {
       toast.error('Failed to update bookmark')
@@ -70,7 +86,7 @@ export function EditBookmarkDialog({
         <DialogHeader>
           <DialogTitle className="text-foreground">Edit Bookmark</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="edit-url" className="text-xs font-medium text-muted-foreground">
               URL
@@ -79,10 +95,13 @@ export function EditBookmarkDialog({
               id="edit-url"
               type="url"
               required
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              {...register('url')}
+              aria-invalid={!!errors.url}
               className="h-9 rounded-lg border border-border bg-secondary/50 px-3 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
             />
+            {errors.url && (
+              <p className="text-xs text-destructive">{errors.url.message}</p>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -93,10 +112,13 @@ export function EditBookmarkDialog({
               id="edit-title"
               type="text"
               required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              {...register('title')}
+              aria-invalid={!!errors.title}
               className="h-9 rounded-lg border border-border bg-secondary/50 px-3 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
             />
+            {errors.title && (
+              <p className="text-xs text-destructive">{errors.title.message}</p>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -105,11 +127,14 @@ export function EditBookmarkDialog({
             </label>
             <textarea
               id="edit-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              {...register('description')}
               rows={2}
+              aria-invalid={!!errors.description}
               className="rounded-lg border border-border bg-secondary/50 px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
             />
+            {errors.description && (
+              <p className="text-xs text-destructive">{errors.description.message}</p>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -118,8 +143,7 @@ export function EditBookmarkDialog({
             </label>
             <select
               id="edit-collection"
-              value={collectionId}
-              onChange={(e) => setCollectionId(e.target.value)}
+              {...register('collectionId')}
               className="h-9 rounded-lg border border-border bg-secondary/50 px-3 text-sm text-foreground focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
             >
               <option value="">No collection</option>
@@ -138,18 +162,21 @@ export function EditBookmarkDialog({
             <input
               id="edit-tags"
               type="text"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
+              {...register('tags')}
+              aria-invalid={!!errors.tags}
               className="h-9 rounded-lg border border-border bg-secondary/50 px-3 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/50"
             />
+            {errors.tags && (
+              <p className="text-xs text-destructive">{errors.tags.message}</p>
+            )}
           </div>
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={isSubmitting}
             className="flex h-10 items-center justify-center gap-2 rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            {loading ? (
+            {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Saving...

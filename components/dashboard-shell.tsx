@@ -10,6 +10,7 @@ import { BookmarkHeader } from '@/components/bookmark-header'
 import { AddBookmarkDialog } from '@/components/add-bookmark-dialog'
 import { AddCollectionDialog } from '@/components/add-collection-dialog'
 import { EditBookmarkDialog } from '@/components/edit-bookmark-dialog'
+import { toast } from 'sonner'
 
 interface DashboardShellProps {
   user: User
@@ -28,6 +29,28 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
   const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
+  const openAddBookmarkDialog = useCallback(() => {
+    requestAnimationFrame(() => setAddBookmarkOpen(true))
+  }, [])
+
+  const handleBookmarkCreated = useCallback((bookmark: Bookmark) => {
+    setBookmarks((prev) => {
+      if (prev.some((item) => item.id === bookmark.id)) {
+        return prev
+      }
+      return [bookmark, ...prev]
+    })
+  }, [])
+
+  const handleCollectionCreated = useCallback((collection: Collection) => {
+    setCollections((prev) => {
+      if (prev.some((item) => item.id === collection.id)) {
+        return prev
+      }
+      return [...prev, collection]
+    })
+  }, [])
+
   // Real-time subscription
   useEffect(() => {
     const supabase = createClient()
@@ -44,7 +67,13 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
         },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setBookmarks((prev) => [payload.new as Bookmark, ...prev])
+            setBookmarks((prev) => {
+              const nextBookmark = payload.new as Bookmark
+              if (prev.some((item) => item.id === nextBookmark.id)) {
+                return prev
+              }
+              return [nextBookmark, ...prev]
+            })
           } else if (payload.eventType === 'UPDATE') {
             setBookmarks((prev) =>
               prev.map((b) => (b.id === (payload.new as Bookmark).id ? (payload.new as Bookmark) : b))
@@ -68,7 +97,13 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
         },
         (payload) => {
           if (payload.eventType === 'INSERT') {
-            setCollections((prev) => [...prev, payload.new as Collection])
+            setCollections((prev) => {
+              const nextCollection = payload.new as Collection
+              if (prev.some((item) => item.id === nextCollection.id)) {
+                return prev
+              }
+              return [...prev, nextCollection]
+            })
           } else if (payload.eventType === 'UPDATE') {
             setCollections((prev) =>
               prev.map((c) => (c.id === (payload.new as Collection).id ? (payload.new as Collection) : c))
@@ -113,17 +148,71 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
 
   const handleDeleteBookmark = async (id: string) => {
     const supabase = createClient()
-    await supabase.from('bookmarks').delete().eq('id', id)
+    const { error } = await supabase
+      .from('bookmarks')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
+
+    if (error) {
+      toast.error('Failed to delete bookmark')
+      return
+    }
+
+    setBookmarks((prev) => prev.filter((bookmark) => bookmark.id !== id))
   }
 
   const handleToggleFavorite = async (id: string, isFavorite: boolean) => {
     const supabase = createClient()
-    await supabase.from('bookmarks').update({ is_favorite: !isFavorite }).eq('id', id)
+    const nextFavorite = !isFavorite
+    const { error } = await supabase
+      .from('bookmarks')
+      .update({ is_favorite: nextFavorite })
+      .eq('id', id)
+      .eq('user_id', user.id)
+
+    if (error) {
+      toast.error('Failed to update favorite')
+      return
+    }
+
+    setBookmarks((prev) =>
+      prev.map((bookmark) =>
+        bookmark.id === id
+          ? {
+              ...bookmark,
+              is_favorite: nextFavorite,
+            }
+          : bookmark
+      )
+    )
   }
 
   const handleDeleteCollection = async (id: string) => {
     const supabase = createClient()
-    await supabase.from('collections').delete().eq('id', id)
+    const { error } = await supabase
+      .from('collections')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id)
+
+    if (error) {
+      toast.error('Failed to delete collection')
+      return
+    }
+
+    setCollections((prev) => prev.filter((collection) => collection.id !== id))
+    setBookmarks((prev) =>
+      prev.map((bookmark) =>
+        bookmark.collection_id === id
+          ? {
+              ...bookmark,
+              collection_id: null,
+            }
+          : bookmark
+      )
+    )
+
     if (activeCollection === id) {
       setActiveCollection(null)
       setShowFavorites(false)
@@ -171,7 +260,7 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
           count={filteredBookmarks.length}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          onAddBookmark={() => setAddBookmarkOpen(true)}
+          onAddBookmark={openAddBookmarkDialog}
           onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           sidebarOpen={sidebarOpen}
         />
@@ -190,12 +279,14 @@ export function DashboardShell({ user, initialBookmarks, initialCollections }: D
         userId={user.id}
         collections={collections}
         activeCollection={activeCollection}
+        onBookmarkCreated={handleBookmarkCreated}
       />
 
       <AddCollectionDialog
         open={addCollectionOpen}
         onOpenChange={setAddCollectionOpen}
         userId={user.id}
+        onCollectionCreated={handleCollectionCreated}
       />
 
       {editingBookmark && (
